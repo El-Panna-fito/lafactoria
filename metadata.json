@@ -1,0 +1,6 @@
+{
+  "name": "La factorIA",
+  "description": "Sitio web institucional, catálogo de proyectos, marketplace de demos y plataforma administrable de La factorIA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
