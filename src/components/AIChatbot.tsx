@@ -252,6 +252,19 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
         text: m.text,
       }));
 
+      // Build a compact catalog from the projects ACTUALLY loaded in the system
+      // so the AI advisor only recommends real, published projects.
+      const catalogPayload = projects
+        .filter((p) => p.status === 'published')
+        .map((p) => ({
+          slug: p.slug,
+          title: p.title,
+          category: p.category_name,
+          short_description: p.short_description,
+          tags: p.tags,
+          features: (p.features || []).map((f) => f.title),
+        }));
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -259,6 +272,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
           message,
           history: historyPayload,
           userName: contactInfo.name,
+          catalog: catalogPayload,
         }),
       });
 

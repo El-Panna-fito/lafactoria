@@ -21,11 +21,33 @@ async function startServer() {
   // Chatbot endpoint with Gemini
   app.post('/api/chat', async (req, res) => {
     try {
-      const { message, history = [] } = req.body;
+      const { message, history = [], catalog = [] } = req.body;
 
       if (!message || typeof message !== 'string') {
         return res.status(400).json({ error: 'El mensaje es obligatorio' });
       }
+
+      // Build the catalog section dynamically from the projects ACTUALLY loaded
+      // in the system (sent by the client). This guarantees the advisor only
+      // recommends real, existing projects and never invents slugs.
+      const catalogItems = Array.isArray(catalog) ? catalog : [];
+      const validSlugs = new Set(
+        catalogItems
+          .map((p: any) => (typeof p?.slug === 'string' ? p.slug : null))
+          .filter(Boolean)
+      );
+
+      const catalogSection =
+        catalogItems.length > 0
+          ? catalogItems
+              .map((p: any) => {
+                const tags = Array.isArray(p.tags) ? p.tags.join(', ') : '';
+                const features = Array.isArray(p.features) ? p.features.join('; ') : '';
+                return `- \`${p.slug}\`: ${p.title}${p.category ? ` [${p.category}]` : ''}
+  Descripción: ${p.short_description || ''}${tags ? `\n  Tecnologías/Tags: ${tags}` : ''}${features ? `\n  Funcionalidades: ${features}` : ''}`;
+              })
+              .join('\n')
+          : 'No hay proyectos cargados en el sistema en este momento. No recomiendes ningún proyecto puntual y ofrecé una cotización a medida.';
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -60,18 +82,14 @@ PAUTAS DE INTERACCIÓN Y DESCUBRIMIENTO:
 
 2. **Recomendación Precisa y Exclusiva**:
    - Solo cuando el usuario exprese claramente su rubro o necesidad (o responda al diagnóstico), explícale qué tipo de arquitectura web le conviene (Landing de alta conversión, E-commerce transaccional, Portal institucional, Sistema con turnero, etc.) y por qué.
-   - Si corresponde mostrarle un demo interactivo de nuestro catálogo que coincida con lo que busca, agrega al final de tu mensaje el tag especial: \`[PROYECTO:slug]\` (ejemplos: \`[PROYECTO:cecp]\`, \`[PROYECTO:stellar-boutique]\`, etc.).
+   - Si corresponde mostrarle un demo interactivo de nuestro catálogo que coincida con lo que busca, agrega al final de tu mensaje el tag especial: \`[PROYECTO:slug]\` usando EXCLUSIVAMENTE alguno de los slugs listados en el "CATÁLOGO DE PROYECTOS CARGADOS EN EL SISTEMA" de abajo.
+   - REGLA CRÍTICA: NUNCA inventes ni menciones proyectos o slugs que no estén en esa lista. Basá tus recomendaciones únicamente en los proyectos reales cargados en el sistema. Si ninguno encaja perfecto, recomendá el más cercano y aclaralo, u ofrecé un desarrollo a medida.
+   - Cuando recomiendes un proyecto, explicá brevemente POR QUÉ ese caso concreto (por sus funcionalidades/rubro) es el indicado para la necesidad del usuario.
    - Si el usuario expresó requerimientos o el tipo de web que busca, agrega al final un tag con el resumen para el CRM: \`[RESUMEN:resumen conciso de los requerimientos]\` y el tipo de servicio \`[SERVICIO:tipo de servicio]\`.
    - Si no estás recomendando un proyecto puntual o aún no se definió la necesidad, NO incluyas esos tags.
 
-CATÁLOGO DE PROYECTOS DISPONIBLES (y sus slugs):
-- \`cecp\`: Centro Educativo CECP (Para colegios, escuelas, academias, universidades e institutos de formación).
-- \`stellar-boutique\`: Stellar Boutique (Para e-commerce, tiendas de ropa, calzado, accesorios con Mercado Pago y cuotas).
-- \`mediplus-connect\`: MediPlus Connect (Para clínicas, consultorios médicos, psicólogos, odontología y turnero online 24/7).
-- \`logistech-pro\`: LogisTech Pro (Para empresas de logística, transporte, flotas, dashboards y SaaS corporativo).
-- \`agrodigital-hub\`: AgroDigital Hub (Para empresas del agro, acopios, cereales, cotizaciones y clima en vivo).
-- \`nova-inmobiliaria\`: Nova Inmobiliaria (Para inmobiliarias, constructoras, búsqueda de propiedades y alquileres).
-- \`estudio-alvear\`: Estudio Jurídico Alvear & Asoc. (Para estudios contables, legales, escribanías y consultoría).
+CATÁLOGO DE PROYECTOS CARGADOS EN EL SISTEMA (única fuente de verdad para recomendar; usá estos slugs tal cual):
+${catalogSection}
 
 INFORMACIÓN INSTITUCIONAL Y CONTACTO:
 - Ubicación / Dirección: Gualeguaychú 449, Paraná, Entre Ríos, Argentina (atención presencial y remota para todo el país e internacional).
@@ -123,7 +141,8 @@ ESTILO Y TONO:
       const recommendedProjects: string[] = [];
 
       for (const match of projectMatches) {
-        if (match[1]) {
+        // Only keep slugs that correspond to a project actually loaded in the system.
+        if (match[1] && (validSlugs.size === 0 || validSlugs.has(match[1]))) {
           recommendedProjects.push(match[1]);
         }
       }
