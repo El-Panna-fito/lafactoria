@@ -2,7 +2,16 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
+import { generateText } from 'ai';
+import dotenv from 'dotenv';
+
+// Load environment variables (AI_GATEWAY_API_KEY, Supabase keys, etc.) into
+// process.env. This Express server does not auto-load .env files the way
+// Next.js does, so we load them explicitly. Files loaded later do not override
+// variables already set (e.g. real platform env vars in production).
+dotenv.config({ path: '.env.development.local' });
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,30 +30,33 @@ async function startServer() {
   // Chatbot endpoint with Gemini
   app.post('/api/chat', async (req, res) => {
     try {
-      const { message, history = [] } = req.body;
+      const { message, history = [], catalog = [] } = req.body;
 
       if (!message || typeof message !== 'string') {
         return res.status(400).json({ error: 'El mensaje es obligatorio' });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        return res.status(200).json({
-          reply:
-            '¡Hola! Soy el asistente virtual de **La factorIA**. Actualmente no se ha detectado la clave de API de Gemini configurada en el servidor, pero puedo contarte que desarrollamos sitios institucionales, e-commerce con Mercado Pago, plataformas educativas, turneros médicos y portales a medida. Podés explorar nuestro catálogo o hacer clic en **"Cotizá tu proyecto"** para contactar a nuestro equipo.',
-          recommendedProjects: ['cecp', 'stellar-boutique', 'mediplus-connect'],
-          suggestQuote: true,
-        });
-      }
+      // Build the catalog section dynamically from the projects ACTUALLY loaded
+      // in the system (sent by the client). This guarantees the advisor only
+      // recommends real, existing projects and never invents slugs.
+      const catalogItems = Array.isArray(catalog) ? catalog : [];
+      const validSlugs = new Set(
+        catalogItems
+          .map((p: any) => (typeof p?.slug === 'string' ? p.slug : null))
+          .filter(Boolean)
+      );
 
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
+      const catalogSection =
+        catalogItems.length > 0
+          ? catalogItems
+              .map((p: any) => {
+                const tags = Array.isArray(p.tags) ? p.tags.join(', ') : '';
+                const features = Array.isArray(p.features) ? p.features.join('; ') : '';
+                return `- \`${p.slug}\`: ${p.title}${p.category ? ` [${p.category}]` : ''}
+  Descripción: ${p.short_description || ''}${tags ? `\n  Tecnologías/Tags: ${tags}` : ''}${features ? `\n  Funcionalidades: ${features}` : ''}`;
+              })
+              .join('\n')
+          : 'No hay proyectos cargados en el sistema en este momento. No recomiendes ningún proyecto puntual y ofrecé una cotización a medida.';
 
       const systemInstruction = `
 Eres el asesor de descubrimiento digital y consultor de soluciones de **La factorIA** (software factory del ecosistema educativo y tecnológico IEC en Paraná, Entre Ríos, Argentina).
@@ -60,18 +72,14 @@ PAUTAS DE INTERACCIÓN Y DESCUBRIMIENTO:
 
 2. **Recomendación Precisa y Exclusiva**:
    - Solo cuando el usuario exprese claramente su rubro o necesidad (o responda al diagnóstico), explícale qué tipo de arquitectura web le conviene (Landing de alta conversión, E-commerce transaccional, Portal institucional, Sistema con turnero, etc.) y por qué.
-   - Si corresponde mostrarle un demo interactivo de nuestro catálogo que coincida con lo que busca, agrega al final de tu mensaje el tag especial: \`[PROYECTO:slug]\` (ejemplos: \`[PROYECTO:cecp]\`, \`[PROYECTO:stellar-boutique]\`, etc.).
+   - Si corresponde mostrarle un demo interactivo de nuestro catálogo que coincida con lo que busca, agrega al final de tu mensaje el tag especial: \`[PROYECTO:slug]\` usando EXCLUSIVAMENTE alguno de los slugs listados en el "CATÁLOGO DE PROYECTOS CARGADOS EN EL SISTEMA" de abajo.
+   - REGLA CRÍTICA: NUNCA inventes ni menciones proyectos o slugs que no estén en esa lista. Basá tus recomendaciones únicamente en los proyectos reales cargados en el sistema. Si ninguno encaja perfecto, recomendá el más cercano y aclaralo, u ofrecé un desarrollo a medida.
+   - Cuando recomiendes un proyecto, explicá brevemente POR QUÉ ese caso concreto (por sus funcionalidades/rubro) es el indicado para la necesidad del usuario.
    - Si el usuario expresó requerimientos o el tipo de web que busca, agrega al final un tag con el resumen para el CRM: \`[RESUMEN:resumen conciso de los requerimientos]\` y el tipo de servicio \`[SERVICIO:tipo de servicio]\`.
    - Si no estás recomendando un proyecto puntual o aún no se definió la necesidad, NO incluyas esos tags.
 
-CATÁLOGO DE PROYECTOS DISPONIBLES (y sus slugs):
-- \`cecp\`: Centro Educativo CECP (Para colegios, escuelas, academias, universidades e institutos de formación).
-- \`stellar-boutique\`: Stellar Boutique (Para e-commerce, tiendas de ropa, calzado, accesorios con Mercado Pago y cuotas).
-- \`mediplus-connect\`: MediPlus Connect (Para clínicas, consultorios médicos, psicólogos, odontología y turnero online 24/7).
-- \`logistech-pro\`: LogisTech Pro (Para empresas de logística, transporte, flotas, dashboards y SaaS corporativo).
-- \`agrodigital-hub\`: AgroDigital Hub (Para empresas del agro, acopios, cereales, cotizaciones y clima en vivo).
-- \`nova-inmobiliaria\`: Nova Inmobiliaria (Para inmobiliarias, constructoras, búsqueda de propiedades y alquileres).
-- \`estudio-alvear\`: Estudio Jurídico Alvear & Asoc. (Para estudios contables, legales, escribanías y consultoría).
+CATÁLOGO DE PROYECTOS CARGADOS EN EL SISTEMA (única fuente de verdad para recomendar; usá estos slugs tal cual):
+${catalogSection}
 
 INFORMACIÓN INSTITUCIONAL Y CONTACTO:
 - Ubicación / Dirección: Gualeguaychú 449, Paraná, Entre Ríos, Argentina (atención presencial y remota para todo el país e internacional).
@@ -86,36 +94,31 @@ ESTILO Y TONO:
 - Respuestas directas, bien estructuradas, sin repeticiones ni relleno innecesario.
 `;
 
-      // Build conversation contents
-      const formattedContents = [];
+      // Build conversation messages for the AI SDK
+      const conversationMessages: { role: 'user' | 'assistant'; content: string }[] = [];
 
       if (Array.isArray(history) && history.length > 0) {
         for (const item of history.slice(-8)) {
           if (item && item.role && item.text) {
-            formattedContents.push({
-              role: item.role === 'user' ? 'user' : 'model',
-              parts: [{ text: item.text }],
+            conversationMessages.push({
+              role: item.role === 'user' ? 'user' : 'assistant',
+              content: item.text,
             });
           }
         }
       }
 
-      formattedContents.push({
-        role: 'user',
-        parts: [{ text: message }],
-      });
+      conversationMessages.push({ role: 'user', content: message });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: formattedContents,
-        config: {
-          systemInstruction,
-          temperature: 0.6,
-        },
+      const { text: generatedText } = await generateText({
+        model: 'google/gemini-2.5-flash',
+        system: systemInstruction,
+        messages: conversationMessages,
+        temperature: 0.6,
       });
 
       let rawReply =
-        response.text ||
+        generatedText ||
         '¡Gracias por tu consulta! En La factorIA desarrollamos soluciones a medida. ¿Qué objetivo principal te gustaría lograr con tu sitio web?';
 
       // Extract [PROYECTO:slug] tags if present
@@ -123,7 +126,8 @@ ESTILO Y TONO:
       const recommendedProjects: string[] = [];
 
       for (const match of projectMatches) {
-        if (match[1]) {
+        // Only keep slugs that correspond to a project actually loaded in the system.
+        if (match[1] && (validSlugs.size === 0 || validSlugs.has(match[1]))) {
           recommendedProjects.push(match[1]);
         }
       }
