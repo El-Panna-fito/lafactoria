@@ -2,7 +2,16 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
+import { generateText } from 'ai';
+import dotenv from 'dotenv';
+
+// Load environment variables (AI_GATEWAY_API_KEY, Supabase keys, etc.) into
+// process.env. This Express server does not auto-load .env files the way
+// Next.js does, so we load them explicitly. Files loaded later do not override
+// variables already set (e.g. real platform env vars in production).
+dotenv.config({ path: '.env.development.local' });
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,25 +58,6 @@ async function startServer() {
               .join('\n')
           : 'No hay proyectos cargados en el sistema en este momento. No recomiendes ningún proyecto puntual y ofrecé una cotización a medida.';
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        return res.status(200).json({
-          reply:
-            '¡Hola! Soy el asistente virtual de **La factorIA**. Actualmente no se ha detectado la clave de API de Gemini configurada en el servidor, pero puedo contarte que desarrollamos sitios institucionales, e-commerce con Mercado Pago, plataformas educativas, turneros médicos y portales a medida. Podés explorar nuestro catálogo o hacer clic en **"Cotizá tu proyecto"** para contactar a nuestro equipo.',
-          recommendedProjects: ['cecp', 'stellar-boutique', 'mediplus-connect'],
-          suggestQuote: true,
-        });
-      }
-
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
-
       const systemInstruction = `
 Eres el asesor de descubrimiento digital y consultor de soluciones de **La factorIA** (software factory del ecosistema educativo y tecnológico IEC en Paraná, Entre Ríos, Argentina).
 
@@ -104,36 +94,31 @@ ESTILO Y TONO:
 - Respuestas directas, bien estructuradas, sin repeticiones ni relleno innecesario.
 `;
 
-      // Build conversation contents
-      const formattedContents = [];
+      // Build conversation messages for the AI SDK
+      const conversationMessages: { role: 'user' | 'assistant'; content: string }[] = [];
 
       if (Array.isArray(history) && history.length > 0) {
         for (const item of history.slice(-8)) {
           if (item && item.role && item.text) {
-            formattedContents.push({
-              role: item.role === 'user' ? 'user' : 'model',
-              parts: [{ text: item.text }],
+            conversationMessages.push({
+              role: item.role === 'user' ? 'user' : 'assistant',
+              content: item.text,
             });
           }
         }
       }
 
-      formattedContents.push({
-        role: 'user',
-        parts: [{ text: message }],
-      });
+      conversationMessages.push({ role: 'user', content: message });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: formattedContents,
-        config: {
-          systemInstruction,
-          temperature: 0.6,
-        },
+      const { text: generatedText } = await generateText({
+        model: 'google/gemini-2.5-flash',
+        system: systemInstruction,
+        messages: conversationMessages,
+        temperature: 0.6,
       });
 
       let rawReply =
-        response.text ||
+        generatedText ||
         '¡Gracias por tu consulta! En La factorIA desarrollamos soluciones a medida. ¿Qué objetivo principal te gustaría lograr con tu sitio web?';
 
       // Extract [PROYECTO:slug] tags if present
